@@ -1,0 +1,23 @@
+# Ignore Python stuff
+__pycache__/
+*.pyc
+
+# Ignore virtual environments
+env/
+venv/
+.venv/
+
+# Ignore system files
+.DS_Store
+
+# Ignore Streamlit secrets if any
+.streamlit/secrets.toml
+
+# Ignore saved uploaded files (if any)
+*.pdf
+*.jpg
+*.png
+*.txt
+
+# Optional: Jupyter/IPython
+.ipynb_checkpoints/

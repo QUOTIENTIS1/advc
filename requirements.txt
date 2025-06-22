@@ -1,0 +1,6 @@
+streamlit
+openai
+pytesseract
+pillow
+pymupdf
+huggingface_hub

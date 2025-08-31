@@ -7,5 +7,5 @@ huggingface_hub
 requests
 wikipedia
 sympy
-
-
+beautifulsoup4
+lxml   # recommended parser for BeautifulSoup

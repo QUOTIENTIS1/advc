@@ -10,7 +10,7 @@ from io import StringIO
 # 🔐 NVIDIA NIM API client
 # -----------------------------
 client = OpenAI(
-    api_key="nvapi-XXXXX",  # replace with your real key
+    api_key="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",  # replace with your real key
     base_url="https://integrate.api.nvidia.com/v1",
 )
 
@@ -197,3 +197,4 @@ if user_input:
                 err = f"❌ API call failed: {e}"
                 st.error(err)
                 st.session_state.messages.append({"role": "assistant", "content": err})
+

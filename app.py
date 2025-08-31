@@ -8,7 +8,7 @@ from io import StringIO
 import wikipedia
 import sympy as sp
 from bs4 import BeautifulSoup
-import time # Added for sleep functionality
+import time # Import the time module for sleep functionality
 
 # -----------------------------
 # 🔐 NVIDIA NIM API client

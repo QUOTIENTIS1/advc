@@ -18,7 +18,7 @@ client = OpenAI(
 # Tools Implementation
 # -----------------------------
 def run_web_search(query: str) -> str:
-    """DuckDuckGo-based search, returns cleaned summary if possible"""
+    """DuckDuckGo-based search, returns cleaned summary if possible with fallback"""
     try:
         url = "https://api.duckduckgo.com/"
         params = {"q": query, "format": "json"}
@@ -31,18 +31,38 @@ def run_web_search(query: str) -> str:
 
         related = data.get("RelatedTopics", [])
         results = []
-        for item in related[:3]:  # top 3 results only
+        for item in related[:5]:  # top 5 results only
             if isinstance(item, dict) and item.get("Text"):
                 results.append({
                     "title": item.get("Text"),
                     "snippet": item.get("Text"),
                     "url": item.get("FirstURL", "")
                 })
+
+        # ✅ Fallback logic
         if results:
-            return json.dumps(results)
-        return "❌ No good results found."
+            # Try to filter for relevant matches
+            keywords = ["tariff", "trade", "duties", "customs", "export", "import"]
+            good_matches = [
+                r for r in results
+                if any(kw in r["title"].lower() or kw in r["snippet"].lower() for kw in keywords)
+            ]
+
+            if good_matches:
+                return json.dumps(good_matches)
+            else:
+                # Return closest available results with disclaimer
+                return json.dumps([{
+                    "title": "⚠️ Closest available results (no exact tariff/trade match)",
+                    "snippet": "Showing related or nearby results since no direct matches were found.",
+                    "url": ""
+                }] + results)
+
+        return f"❌ No results found for '{query}'."
+
     except Exception as e:
         return f"❌ Web search failed: {e}"
+
 
 def run_code(code: str) -> str:
     try:
@@ -102,6 +122,7 @@ def beautify_tool_output(tool: str, result: str) -> str:
             return result
     except Exception:
         return result
+
 
 # -----------------------------
 # Tool registry
@@ -276,3 +297,4 @@ if user_input:
                 err = f"❌ API call failed: {e}"
                 st.error(err)
                 st.session_state.messages.append({"role": "assistant", "content": err})
+

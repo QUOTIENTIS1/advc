@@ -5,6 +5,9 @@ from pdf_utils import extract_text_from_pdf
 from text_utils import extract_text_from_txt
 import requests, subprocess, csv, json, sys
 from io import StringIO
+import wikipedia
+import sympy as sp
+from bs4 import BeautifulSoup
 
 # -----------------------------
 # 🔐 NVIDIA NIM API client
@@ -20,7 +23,6 @@ client = OpenAI(
 def run_web_search(query: str) -> str:
     """DuckDuckGo search with fallback to Google News RSS if empty"""
     try:
-        # --- First try DuckDuckGo Instant Answer API ---
         url = "https://api.duckduckgo.com/"
         params = {"q": query, "format": "json"}
         res = requests.get(url, params=params, timeout=10)
@@ -32,7 +34,7 @@ def run_web_search(query: str) -> str:
 
         related = data.get("RelatedTopics", [])
         results = []
-        for item in related[:5]:  # top 5
+        for item in related[:5]:
             if isinstance(item, dict) and item.get("Text"):
                 results.append({
                     "title": item.get("Text"),
@@ -43,7 +45,7 @@ def run_web_search(query: str) -> str:
         if results:
             return json.dumps(results)
 
-        # --- Fallback: Google News RSS (JSON) ---
+        # --- Fallback: Google News RSS ---
         rss_url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en-US&gl=US&ceid=US:en"
         rss_res = requests.get(rss_url, timeout=10)
         if rss_res.status_code == 200:
@@ -106,6 +108,38 @@ def format_data(data: str, from_format="csv", to_format="json") -> str:
         return f"❌ Data formatting failed: {e}"
 
 
+def wikipedia_tool(query: str) -> str:
+    try:
+        summary = wikipedia.summary(query, sentences=3)
+        return summary
+    except Exception as e:
+        return f"⚠️ Wikipedia lookup failed: {str(e)}"
+
+
+def calculator_tool(expression: str) -> str:
+    try:
+        result = sp.sympify(expression).evalf()
+        return f"{result}"
+    except Exception as e:
+        return f"⚠️ Calculation failed: {str(e)}"
+
+
+def web_scraper_tool(url: str, query: str = None) -> str:
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        text = soup.get_text(separator=" ", strip=True)
+
+        if query:
+            matches = [line for line in text.splitlines() if query.lower() in line.lower()]
+            return "\n".join(matches[:10]) if matches else "No relevant matches found."
+        
+        return text[:1000]
+    except Exception as e:
+        return f"⚠️ Web scraping failed: {str(e)}"
+
+
 # -----------------------------
 # Post-processing
 # -----------------------------
@@ -128,6 +162,12 @@ def beautify_tool_output(tool: str, result: str) -> str:
             return f"### 🐍 Code Output\n```\n{result}\n```"
         elif tool == "data_formatter":
             return f"### 📊 Formatted Data\n```json\n{result}\n```"
+        elif tool == "wikipedia":
+            return f"### 📖 Wikipedia\n{result}"
+        elif tool == "calculator":
+            return f"### 🧮 Calculator Result\n{result}"
+        elif tool == "web_scraper":
+            return f"### 🌐 Web Scraper Extract\n{result}"
         else:
             return result
     except Exception:
@@ -140,7 +180,10 @@ def beautify_tool_output(tool: str, result: str) -> str:
 TOOLS = {
     "web_search": run_web_search,
     "code_runner": run_code,
-    "data_formatter": format_data
+    "data_formatter": format_data,
+    "wikipedia": wikipedia_tool,
+    "calculator": calculator_tool,
+    "web_scraper": web_scraper_tool
 }
 
 TOOL_DESCRIPTIONS = [
@@ -166,6 +209,30 @@ TOOL_DESCRIPTIONS = [
             "name": "data_formatter",
             "description": "Convert raw CSV text into a structured JSON format.",
             "parameters": {"type":"object","properties":{"data":{"type":"string"}},"required":["data"]}
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wikipedia",
+            "description": "Look up concise summaries from Wikipedia.",
+            "parameters": {"type": "object","properties":{"query":{"type":"string"}},"required":["query"]}
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculator",
+            "description": "Perform mathematical calculations using sympy.",
+            "parameters": {"type": "object","properties":{"expression":{"type":"string"}},"required":["expression"]}
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_scraper",
+            "description": "Scrape raw text content from a web page, optionally filtered by a query.",
+            "parameters": {"type": "object","properties":{"url":{"type":"string"},"query":{"type":"string"}},"required":["url"]}
         },
     }
 ]

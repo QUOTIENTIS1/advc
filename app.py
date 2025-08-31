@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 # 🔐 NVIDIA NIM API client
 # -----------------------------
 client = OpenAI(
-    api_key="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",
+    api_key="YOUR_NVIDIA_API_KEY", # Replace with your actual key
     base_url="https://integrate.api.nvidia.com/v1",
 )
 
@@ -27,11 +27,9 @@ def run_web_search(query: str) -> str:
         params = {"q": query, "format": "json"}
         res = requests.get(url, params=params, timeout=10)
         data = res.json()
-
         abstract = data.get("AbstractText", "")
         if abstract:
             return json.dumps([{"title": query, "snippet": abstract, "url": ""}])
-
         related = data.get("RelatedTopics", [])
         results = []
         for item in related[:5]:
@@ -41,10 +39,8 @@ def run_web_search(query: str) -> str:
                     "snippet": item.get("Text"),
                     "url": item.get("FirstURL", "")
                 })
-
         if results:
             return json.dumps(results)
-
         # --- Fallback: Google News RSS ---
         rss_url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en-US&gl=US&ceid=US:en"
         rss_res = requests.get(rss_url, timeout=10)
@@ -64,16 +60,13 @@ def run_web_search(query: str) -> str:
                 })
             if news_results:
                 return json.dumps(news_results)
-
         return json.dumps([{
             "title": "❌ No results",
             "snippet": f"No relevant results found for '{query}'.",
             "url": ""
         }])
-
     except Exception as e:
         return f"❌ Web search failed: {e}"
-
 
 def run_code(code: str) -> str:
     try:
@@ -94,7 +87,6 @@ def run_code(code: str) -> str:
     except Exception as e:
         return f"❌ Code execution failed: {e}"
 
-
 def format_data(data: str, from_format="csv", to_format="json") -> str:
     try:
         if from_format == "csv" and to_format == "json":
@@ -107,14 +99,12 @@ def format_data(data: str, from_format="csv", to_format="json") -> str:
     except Exception as e:
         return f"❌ Data formatting failed: {e}"
 
-
 def wikipedia_tool(query: str) -> str:
     try:
         summary = wikipedia.summary(query, sentences=3)
         return summary
     except Exception as e:
         return f"⚠️ Wikipedia lookup failed: {str(e)}"
-
 
 def calculator_tool(expression: str) -> str:
     try:
@@ -123,14 +113,12 @@ def calculator_tool(expression: str) -> str:
     except Exception as e:
         return f"⚠️ Calculation failed: {str(e)}"
 
-
 def web_scraper_tool(url: str, query: str = None) -> str:
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         text = soup.get_text(separator=" ", strip=True)
-
         if query:
             matches = [line for line in text.splitlines() if query.lower() in line.lower()]
             return "\n".join(matches[:10]) if matches else "No relevant matches found."
@@ -138,7 +126,6 @@ def web_scraper_tool(url: str, query: str = None) -> str:
         return text[:1000]
     except Exception as e:
         return f"⚠️ Web scraping failed: {str(e)}"
-
 
 # -----------------------------
 # Post-processing
@@ -154,14 +141,14 @@ def beautify_tool_output(tool: str, result: str) -> str:
                 title = r.get("title", "No title")
                 snippet = r.get("snippet", "")
                 url = r.get("url", "")
-                formatted += f"- **{title}**\n  {snippet}\n"
+                formatted += f"- {title}\n {snippet}\n"
                 if url:
-                    formatted += f"  👉 [Read more]({url})\n"
+                    formatted += f" 👉 Read more\n"
             return formatted
         elif tool == "code_runner":
-            return f"### 🐍 Code Output\n```\n{result}\n```"
+            return f"### 🐍 Code Output\n\n```\n{result}\n```\n"
         elif tool == "data_formatter":
-            return f"### 📊 Formatted Data\n```json\n{result}\n```"
+            return f"### 📊 Formatted Data\n```json\n{result}\n```\n"
         elif tool == "wikipedia":
             return f"### 📖 Wikipedia\n{result}"
         elif tool == "calculator":
@@ -172,7 +159,6 @@ def beautify_tool_output(tool: str, result: str) -> str:
             return result
     except Exception:
         return result
-
 
 # -----------------------------
 # Tool registry
@@ -241,21 +227,18 @@ TOOL_DESCRIPTIONS = [
 # Streamlit UI
 # -----------------------------
 st.set_page_config(page_title="📄 NVIDIA NIM Chatbot", layout="centered")
-st.title("🧠 File Chatbot + Tools (NVIDIA NIM - GPT-OSS-120B)")
+st.title("🧠 File Chatbot + Tools (NVIDIA NIM)")
 
 if "file_text" not in st.session_state:
     st.session_state.file_text = ""
-
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # File upload
 uploaded_file = st.file_uploader("📎 Upload a file (image, PDF, or text)", type=["png", "jpg", "jpeg", "pdf", "txt"])
-
 if uploaded_file:
     ext = uploaded_file.name.split('.')[-1].lower()
     st.success(f"Uploaded: {uploaded_file.name}")
-
     if ext in ["png", "jpg", "jpeg"]:
         content = extract_text_from_image(uploaded_file)
     elif ext == "pdf":
@@ -264,7 +247,6 @@ if uploaded_file:
         content = extract_text_from_txt(uploaded_file)
     else:
         content = ""
-
     if content:
         st.session_state.file_text = content
         st.info("✅ File content extracted. Ask me anything about it.")
@@ -275,12 +257,11 @@ if uploaded_file:
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-
+        
 # -----------------------------
-# Chat input with Answer Consistency Check
+# Chat input with Dual Response Generation
 # -----------------------------
 user_input = st.chat_input("Ask a question, summarize a file, or request a tool")
-
 if user_input:
     st.chat_message("user").markdown(user_input)
     st.session_state.messages.append({"role": "user", "content": user_input})
@@ -296,15 +277,15 @@ if user_input:
     )
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking with NVIDIA NIM..."):
+        with st.spinner("🧠 Generating responses with NVIDIA NIM..."):
             try:
                 messages_for_model = [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": full_prompt}
                 ]
 
-                # Step 1: Generate initial response
-                response = client.chat.completions.create(
+                # Step 1: Generate the first response
+                response_A = client.chat.completions.create(
                     model="openai/gpt-oss-120b",
                     messages=messages_for_model,
                     tools=TOOL_DESCRIPTIONS,
@@ -313,26 +294,42 @@ if user_input:
                     top_p=1,
                     max_tokens=1024,
                 )
-                raw_msg = response.choices[0].message
-                initial_reply = getattr(raw_msg, "content", None) or (raw_msg.get("content") if isinstance(raw_msg, dict) else "")
+                
+                message_A = response_A.choices[0].message
 
-                # Step 2: Self-reflection for consistency
-                reflection_prompt = f"Reflect on the previous answer and check for accuracy, clarity, and consistency. " \
-                                    f"Previous answer:\n{initial_reply}\n\nIf anything seems wrong or incomplete, correct it."
-                messages_for_model.append({"role": "user", "content": reflection_prompt})
+                # If the model decides to use a tool, we handle that and stop.
+                if message_A.tool_calls:
+                    # (Your existing tool handling logic would go here)
+                    # For now, we'll just display the tool call request
+                    tool_name = message_A.tool_calls[0].function.name
+                    st.markdown(f"Requesting tool: `{tool_name}`")
+                    st.session_state.messages.append({"role": "assistant", "content": f"Tool Call: {tool_name}"})
 
-                reflection = client.chat.completions.create(
-                    model="openai/gpt-oss-120b",
-                    messages=messages_for_model,
-                    temperature=0.3,
-                    top_p=1,
-                    max_tokens=1024,
-                )
-                raw_reflection = reflection.choices[0].message
-                final_reply = getattr(raw_reflection, "content", None) or (raw_reflection.get("content") if isinstance(raw_reflection, dict) else initial_reply)
+                else:
+                    # Step 2: Generate the second response if no tool is called
+                    response_B = client.chat.completions.create(
+                        model="openai/gpt-oss-120b",
+                        messages=messages_for_model,  # Using the same prompt
+                        temperature=0.75, # Slightly different temp for more variation
+                        top_p=1,
+                        max_tokens=1024,
+                    )
+                    
+                    response_A_content = message_A.content
+                    response_B_content = response_B.choices[0].message.content
 
-                st.markdown(final_reply)
-                st.session_state.messages.append({"role": "assistant", "content": final_reply})
+                    # Step 3: Display both responses side-by-side
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("#### Response 1")
+                        st.markdown(response_A_content, unsafe_allow_html=True)
+                    with col2:
+                        st.markdown("#### Response 2")
+                        st.markdown(response_B_content, unsafe_allow_html=True)
+                    
+                    # Store a combined version in history for context
+                    combined_content = f"**Response 1:**\n{response_A_content}\n\n---\n\n**Response 2:**\n{response_B_content}"
+                    st.session_state.messages.append({"role": "assistant", "content": combined_content})
 
             except Exception as e:
                 err = f"❌ API call failed: {e}"

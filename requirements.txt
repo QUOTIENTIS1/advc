@@ -5,3 +5,5 @@ pillow
 pymupdf
 huggingface_hub
 requests
+wikipedia
+

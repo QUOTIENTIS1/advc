@@ -4,3 +4,4 @@ pytesseract
 pillow
 pymupdf
 huggingface_hub
+requests

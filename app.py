@@ -3,15 +3,16 @@ from openai import OpenAI
 from image_utils import extract_text_from_image
 from pdf_utils import extract_text_from_pdf
 from text_utils import extract_text_from_txt
-# 🔐 Together.ai API key
+
+# 🔐 NVIDIA NIM API key
 client = OpenAI(
-    api_key="98aa4fd5da41331d005a511c79831531ac1e18af560c0a0f130f8e6313252a83",
-    base_url="https://api.together.xyz/v1",
+    api_key="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",
+    base_url="https://integrate.api.nvidia.com/v1",
 )
 
 # Streamlit setup
-st.set_page_config(page_title="📄 Mixtral Chatbot", layout="centered")
-st.title("🧠 File Chatbot (Together AI - Mixtral)")
+st.set_page_config(page_title="📄 NVIDIA NIM Chatbot", layout="centered")
+st.title("🧠 File Chatbot (NVIDIA NIM - GPT-OSS-120B)")
 
 # Session storage
 if "file_text" not in st.session_state:
@@ -59,22 +60,25 @@ if user_input:
     full_prompt = f"{user_input}\n\nContext:\n{file_context[:4000]}"
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking with Mixtral..."):
+        with st.spinner("Thinking with NVIDIA NIM..."):
             try:
+                # Call NVIDIA NIM model
                 response = client.chat.completions.create(
-                    model="mistralai/Mixtral-8x7B-Instruct-v0.1",
+                    model="openai/gpt-oss-120b",
                     messages=[
                         {"role": "system", "content": "You are a helpful assistant that answers questions and summarizes uploaded files."},
                         {"role": "user", "content": full_prompt}
                     ],
-                    temperature=0.6,
-                    max_tokens=1024
+                    temperature=0.7,
+                    top_p=1,
+                    max_tokens=1024,
                 )
+
                 reply = response.choices[0].message.content
                 st.markdown(reply)
                 st.session_state.messages.append({"role": "assistant", "content": reply})
+
             except Exception as e:
                 err = f"❌ API call failed: {e}"
                 st.error(err)
                 st.session_state.messages.append({"role": "assistant", "content": err})
-

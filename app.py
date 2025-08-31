@@ -10,7 +10,7 @@ from io import StringIO
 # 🔐 NVIDIA NIM API client
 # -----------------------------
 client = OpenAI(
-    api_key="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",
+    api_key="nvapi-XXXXX",  # replace with your real key
     base_url="https://integrate.api.nvidia.com/v1",
 )
 
@@ -32,7 +32,6 @@ def run_web_search(query: str) -> str:
         return f"❌ Web search failed: {e}"
 
 def run_code(code: str) -> str:
-    """Run Python code in a sandboxed subprocess (cross-platform)."""
     try:
         py_exec = "python3" if sys.platform != "win32" else "python"
         result = subprocess.run(
@@ -63,7 +62,7 @@ def format_data(data: str, from_format="csv", to_format="json") -> str:
         return f"❌ Data formatting failed: {e}"
 
 # -----------------------------
-# Tool registry + handler
+# Tool registry for function-calling
 # -----------------------------
 TOOLS = {
     "web_search": run_web_search,
@@ -71,18 +70,32 @@ TOOLS = {
     "data_formatter": format_data
 }
 
-def handle_tool_call(user_input: str) -> str | None:
-    """Check if input is a tool call and execute the tool."""
-    if user_input.startswith("TOOL:"):
-        try:
-            _, tool_name, arg = user_input.split(":", 2)
-            if tool_name in TOOLS:
-                return TOOLS[tool_name](arg)
-            else:
-                return f"❌ Unknown tool: {tool_name}"
-        except Exception as e:
-            return f"❌ Tool parsing failed: {e}"
-    return None  # not a tool call
+TOOL_DESCRIPTIONS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web and retrieve relevant information.",
+            "parameters": {"type": "object","properties":{"query":{"type":"string"}},"required":["query"]}
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "code_runner",
+            "description": "Run a Python code snippet safely in a sandbox.",
+            "parameters": {"type": "object","properties":{"code":{"type":"string"}},"required":["code"]}
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "data_formatter",
+            "description": "Convert raw CSV text into a structured JSON format.",
+            "parameters": {"type":"object","properties":{"data":{"type":"string"}},"required":["data"]}
+        },
+    }
+]
 
 # -----------------------------
 # Streamlit UI
@@ -124,39 +137,63 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # Chat input
-user_input = st.chat_input("Ask a question or request a tool (e.g. TOOL:web_search:AI news)")
+user_input = st.chat_input("Ask a question, summarize a file, or request a tool")
 
 if user_input:
     st.chat_message("user").markdown(user_input)
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # Step 1: check for tool call
-    tool_response = handle_tool_call(user_input)
-    if tool_response:
-        st.chat_message("assistant").markdown(tool_response)
-        st.session_state.messages.append({"role": "assistant", "content": tool_response})
-    else:
-        # Step 2: fallback to model
-        file_context = st.session_state.file_text or "No file content available."
-        full_prompt = f"{user_input}\n\nContext:\n{file_context[:4000]}"
+    file_context = st.session_state.file_text or "No file content available."
+    full_prompt = f"{user_input}\n\nContext:\n{file_context[:4000]}"
 
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking with NVIDIA NIM..."):
-                try:
-                    response = client.chat.completions.create(
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking with NVIDIA NIM..."):
+            try:
+                response = client.chat.completions.create(
+                    model="openai/gpt-oss-120b",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant that answers questions, summarizes files, and can call tools if needed."},
+                        {"role": "user", "content": full_prompt}
+                    ],
+                    tools=TOOL_DESCRIPTIONS,
+                    tool_choice="auto",
+                    temperature=0.7,
+                    top_p=1,
+                    max_tokens=1024,
+                )
+
+                msg = response.choices[0].message
+
+                # If the model requested a tool
+                if msg.tool_calls:
+                    tool_results = []
+                    for tool_call in msg.tool_calls:
+                        name = tool_call.function.name
+                        args = tool_call.function.arguments
+                        if name in TOOLS:
+                            try:
+                                result = TOOLS[name](**args)
+                            except Exception as e:
+                                result = f"⚠️ Tool error: {e}"
+                            tool_results.append({"tool": name, "result": result})
+
+                    # Send tool results back
+                    followup = client.chat.completions.create(
                         model="openai/gpt-oss-120b",
                         messages=[
-                            {"role": "system", "content": "You are a helpful assistant that answers questions, summarizes files, and can call tools if needed."},
-                            {"role": "user", "content": full_prompt}
-                        ],
-                        temperature=0.7,
-                        top_p=1,
-                        max_tokens=1024,
+                            {"role": "system", "content": "You are a helpful assistant."},
+                            {"role": "user", "content": full_prompt},
+                            {"role": "assistant", "content": str(tool_results)}
+                        ]
                     )
-                    reply = response.choices[0].message.content
-                    st.markdown(reply)
-                    st.session_state.messages.append({"role": "assistant", "content": reply})
-                except Exception as e:
-                    err = f"❌ API call failed: {e}"
-                    st.error(err)
-                    st.session_state.messages.append({"role": "assistant", "content": err})
+                    reply = followup.choices[0].message.content
+                else:
+                    reply = msg.content
+
+                st.markdown(reply)
+                st.session_state.messages.append({"role": "assistant", "content": reply})
+
+            except Exception as e:
+                err = f"❌ API call failed: {e}"
+                st.error(err)
+                st.session_state.messages.append({"role": "assistant", "content": err})

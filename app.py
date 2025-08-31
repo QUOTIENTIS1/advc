@@ -8,6 +8,7 @@ from io import StringIO
 import wikipedia
 import sympy as sp
 from bs4 import BeautifulSoup
+import time # Added for sleep functionality
 
 # -----------------------------
 # 🔐 NVIDIA NIM API client
@@ -259,7 +260,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
         
 # -----------------------------
-# Chat input with Dual Response Generation
+# Chat input with Consistency Check
 # -----------------------------
 user_input = st.chat_input("Ask a question, summarize a file, or request a tool")
 if user_input:
@@ -269,70 +270,97 @@ if user_input:
     file_context = st.session_state.file_text or "No file content available."
     full_prompt = f"{user_input}\n\nContext:\n{file_context[:4000]}"
 
-    system_prompt = (
+    # System prompt for the primary generation with tool use
+    system_prompt_primary = (
         "You are a helpful assistant that answers questions and summarizes uploaded files. "
         "You may call external tools when needed. If you decide to use a tool, return ONLY a single JSON object "
         "and nothing else, exactly like: {\"tool\":\"<tool_name>\", \"parameters\": { ... }}. "
         f"Available tools: {[(t['function']['name'], t['function']['description']) for t in TOOL_DESCRIPTIONS]}"
     )
+    
+    # System prompt for the reflection/consistency check
+    system_prompt_reflection = (
+        "You are an expert AI assistant tasked with reviewing and improving an initial draft of a response. "
+        "Your goal is to ensure the response is accurate, complete, and well-structured. "
+        "Refine the draft into a high-quality final answer. Do not use tools in this step."
+    )
 
     with st.chat_message("assistant"):
-        with st.spinner("🧠 Generating responses with NVIDIA NIM..."):
+        with st.spinner("🧠 Generating and checking answer..."):
             try:
-                messages_for_model = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": full_prompt}
-                ]
-
-                # Step 1: Generate the first response
-                response_A = client.chat.completions.create(
+                # Step 1: Primary Generation (First Pass)
+                response_draft = client.chat.completions.create(
                     model="openai/gpt-oss-120b",
-                    messages=messages_for_model,
-                    tools=TOOL_DESCRIPTIONS,
+                    messages=[
+                        {"role": "system", "content": system_prompt_primary},
+                        {"role": "user", "content": full_prompt}
+                    ],
+                    tools=TOOL_DESCRIPTIONS, 
                     tool_choice="auto",
                     temperature=0.7,
                     top_p=1,
                     max_tokens=1024,
                 )
                 
-                message_A = response_A.choices[0].message
+                message_draft = response_draft.choices[0].message
 
-                # If the model decides to use a tool, we handle that and stop.
-                if message_A.tool_calls:
-                    # (Your existing tool handling logic would go here)
-                    # For now, we'll just display the tool call request
-                    tool_name = message_A.tool_calls[0].function.name
-                    st.markdown(f"Requesting tool: `{tool_name}`")
-                    st.session_state.messages.append({"role": "assistant", "content": f"Tool Call: {tool_name}"})
+                # Handle tool calls first
+                if message_draft.tool_calls:
+                    tool_name = message_draft.tool_calls[0].function.name
+                    tool_params = json.loads(message_draft.tool_calls[0].function.arguments)
+                    
+                    st.markdown(f"**Action:** Calling tool `{tool_name}` with parameters: `{tool_params}`")
+                    
+                    if tool_name in TOOLS:
+                        tool_func = TOOLS[tool_name]
+                        tool_output = tool_func(**tool_params)
+                        
+                        st.markdown(f"**Tool Output:**")
+                        st.code(tool_output)
+                        
+                        # Follow-up API call to summarize tool output and provide a final answer
+                        followup_messages = [
+                            {"role": "user", "content": full_prompt},
+                            {"role": "assistant", "content": json.dumps(message_draft.tool_calls[0].function.to_dict())},
+                            {"role": "tool", "content": tool_output, "name": tool_name}
+                        ]
+                        
+                        final_response = client.chat.completions.create(
+                            model="openai/gpt-oss-120b",
+                            messages=followup_messages,
+                            temperature=0.7,
+                            top_p=1,
+                            max_tokens=1024,
+                        )
+                        final_response_content = final_response.choices[0].message.content
+                        st.markdown(final_response_content)
+                        st.session_state.messages.append({"role": "assistant", "content": final_response_content})
 
                 else:
-                    # Step 2: Generate the second response if no tool is called
-                    response_B = client.chat.completions.create(
+                    # No tool call, proceed with the consistency check (reflection)
+                    draft_content = message_draft.content
+                    
+                    # Pause briefly before the reflection call to avoid rate limit issues, if any
+                    time.sleep(0.2)
+                    
+                    # Step 2: Consistency Check (Reflection)
+                    reflection_prompt = f"Initial draft:\n{draft_content}\n\nReview this draft for accuracy and clarity, then provide a final, improved answer. The final answer should be well-written and comprehensive. Do not use tools."
+
+                    reflection_response = client.chat.completions.create(
                         model="openai/gpt-oss-120b",
-                        messages=messages_for_model,  # Using the same prompt
-                        temperature=0.75, # Slightly different temp for more variation
-                        top_p=1,
+                        messages=[
+                            {"role": "system", "content": system_prompt_reflection},
+                            {"role": "user", "content": reflection_prompt}
+                        ],
+                        temperature=0.2, # Lower temperature for focused refinement
                         max_tokens=1024,
                     )
                     
-                    response_A_content = message_A.content
-                    response_B_content = response_B.choices[0].message.content
-
-                    # Step 3: Display both responses side-by-side
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("#### Response 1")
-                        st.markdown(response_A_content, unsafe_allow_html=True)
-                    with col2:
-                        st.markdown("#### Response 2")
-                        st.markdown(response_B_content, unsafe_allow_html=True)
-                    
-                    # Store a combined version in history for context
-                    combined_content = f"**Response 1:**\n{response_A_content}\n\n---\n\n**Response 2:**\n{response_B_content}"
-                    st.session_state.messages.append({"role": "assistant", "content": combined_content})
+                    final_content = reflection_response.choices[0].message.content
+                    st.markdown(final_content)
+                    st.session_state.messages.append({"role": "assistant", "content": final_content})
 
             except Exception as e:
                 err = f"❌ API call failed: {e}"
                 st.error(err)
                 st.session_state.messages.append({"role": "assistant", "content": err})
-

@@ -6,4 +6,6 @@ pymupdf
 huggingface_hub
 requests
 wikipedia
+sympy
+
 

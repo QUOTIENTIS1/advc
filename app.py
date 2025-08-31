@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 # 🔐 NVIDIA NIM API client
 # -----------------------------
 client = OpenAI(
-    api_key="YOUR_NVIDIA_API_KEY", # Replace with your actual key
+    api_key="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", # Replace with your actual key
     base_url="https://integrate.api.nvidia.com/v1",
 )
 
@@ -335,3 +335,4 @@ if user_input:
                 err = f"❌ API call failed: {e}"
                 st.error(err)
                 st.session_state.messages.append({"role": "assistant", "content": err})
+

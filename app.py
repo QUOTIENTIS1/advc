@@ -1,9 +1,8 @@
 import streamlit as st
 from openai import OpenAI
-from utils.image_utils import extract_text_from_image
-from utils.pdf_utils import extract_text_from_pdf
-from utils.text_utils import extract_text_from_txt
-
+from image_utils import extract_text_from_image
+from pdf_utils import extract_text_from_pdf
+from text_utils import extract_text_from_txt
 # 🔐 Together.ai API key
 client = OpenAI(
     api_key="98aa4fd5da41331d005a511c79831531ac1e18af560c0a0f130f8e6313252a83",
@@ -78,3 +77,4 @@ if user_input:
                 err = f"❌ API call failed: {e}"
                 st.error(err)
                 st.session_state.messages.append({"role": "assistant", "content": err})
+

@@ -1,4 +1,4 @@
-import streamlit as st
+
 from openai import OpenAI
 from image_utils import extract_text_from_image
 from pdf_utils import extract_text_from_pdf
@@ -8,6 +8,12 @@ from io import StringIO
 import wikipedia
 import sympy as sp
 from bs4 import BeautifulSoup
+import streamlit as st
+import traceback, sys
+
+def show_traceback(e):
+    st.error("⚠️ App crashed")
+    st.code("".join(traceback.format_exception(*sys.exc_info())), language="python")
 
 # -----------------------------
 # 🔐 NVIDIA NIM API client
@@ -177,3 +183,4 @@ def beautify_tool_output(tool: str, result: str) -> str:
             return result
     except Exception:
         return result
+

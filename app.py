@@ -276,7 +276,9 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Chat input
+# -----------------------------
+# Chat input with Answer Consistency Check
+# -----------------------------
 user_input = st.chat_input("Ask a question, summarize a file, or request a tool")
 
 if user_input:
@@ -301,71 +303,33 @@ if user_input:
                     {"role": "user", "content": full_prompt}
                 ]
 
-                final_reply = None
-                max_cycles = 3
-                for cycle in range(max_cycles):
-                    response = client.chat.completions.create(
-                        model="openai/gpt-oss-120b",
-                        messages=messages_for_model,
-                        tools=TOOL_DESCRIPTIONS,
-                        tool_choice="auto",
-                        temperature=0.7,
-                        top_p=1,
-                        max_tokens=1024,
-                    )
+                # Step 1: Generate initial response
+                response = client.chat.completions.create(
+                    model="openai/gpt-oss-120b",
+                    messages=messages_for_model,
+                    tools=TOOL_DESCRIPTIONS,
+                    tool_choice="auto",
+                    temperature=0.7,
+                    top_p=1,
+                    max_tokens=1024,
+                )
+                raw_msg = response.choices[0].message
+                initial_reply = getattr(raw_msg, "content", None) or (raw_msg.get("content") if isinstance(raw_msg, dict) else "")
 
-                    raw_msg = response.choices[0].message
-                    content = getattr(raw_msg, "content", None) or (raw_msg.get("content") if isinstance(raw_msg, dict) else "")
-                    tool_calls = getattr(raw_msg, "tool_calls", None) if not isinstance(raw_msg, dict) else raw_msg.get("tool_calls")
+                # Step 2: Self-reflection for consistency
+                reflection_prompt = f"Reflect on the previous answer and check for accuracy, clarity, and consistency. " \
+                                    f"Previous answer:\n{initial_reply}\n\nIf anything seems wrong or incomplete, correct it."
+                messages_for_model.append({"role": "user", "content": reflection_prompt})
 
-                    if not tool_calls:
-                        final_reply = content
-                        break
-
-                    for tool_call in tool_calls:
-                        func_obj = getattr(tool_call, "function", None) if not isinstance(tool_call, dict) else tool_call.get("function")
-                        name = getattr(func_obj, "name", None) if not isinstance(func_obj, dict) else func_obj.get("name")
-                        raw_args = getattr(func_obj, "arguments", None) if not isinstance(func_obj, dict) else func_obj.get("arguments")
-
-                        args = {}
-                        if isinstance(raw_args, str):
-                            try:
-                                args = json.loads(raw_args)
-                            except Exception:
-                                args = {}
-                        elif isinstance(raw_args, dict):
-                            args = raw_args
-
-                        if not name or name not in TOOLS:
-                            st.warning(f"❌ Invalid tool call: {name}")
-                            continue
-
-                        # Run tool
-                        result_raw = TOOLS[name](**args)
-                        pretty_result = beautify_tool_output(name, result_raw)
-
-                        # Show pretty result
-                        st.markdown(pretty_result)
-
-                        # Feed raw back to model
-                        messages_for_model.append({
-                            "role": "system",
-                            "content": f"Tool output ({name}): {result_raw}"
-                        })
-
-                    # Tell model to continue
-                    messages_for_model.append({"role": "system", "content": "Use the tool outputs above to answer the user."})
-
-                if final_reply is None:
-                    wrapup = client.chat.completions.create(
-                        model="openai/gpt-oss-120b",
-                        messages=messages_for_model,
-                        temperature=0.3,
-                        top_p=1,
-                        max_tokens=1024,
-                    )
-                    raw_wrap = wrapup.choices[0].message
-                    final_reply = getattr(raw_wrap, "content", None) or (raw_wrap.get("content") if isinstance(raw_wrap, dict) else "Sorry, couldn't produce a final reply.")
+                reflection = client.chat.completions.create(
+                    model="openai/gpt-oss-120b",
+                    messages=messages_for_model,
+                    temperature=0.3,
+                    top_p=1,
+                    max_tokens=1024,
+                )
+                raw_reflection = reflection.choices[0].message
+                final_reply = getattr(raw_reflection, "content", None) or (raw_reflection.get("content") if isinstance(raw_reflection, dict) else initial_reply)
 
                 st.markdown(final_reply)
                 st.session_state.messages.append({"role": "assistant", "content": final_reply})

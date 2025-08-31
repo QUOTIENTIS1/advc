@@ -332,17 +332,3 @@ if user_input:
                 st.error(err)
                 st.session_state.messages.append({"role": "assistant", "content": err})
 
----
-
-### Instructions for the Changes
-
-1.  **Replace Model**: Change `model="openai/gpt-oss-120b"` to `model="deepseek-ai/deepseek-v3.1"` in the `client.chat.completions.create()` function.
-2.  **Add `extra_body`**: Add the `extra_body` parameter to the API call. `extra_body={"chat_template_kwargs": {"thinking":True}}` is the specific parameter required by the DeepSeek V3.1 model to enable its "thinking" mode.
-3.  **Implement Streaming and `reasoning_content`**: The provided DeepSeek code uses a streamed response to display the thinking process. Your existing app.py does not handle streaming. The updated code adds a `placeholder` and a `for` loop to handle the streaming response, printing the `reasoning_content` and displaying the main `content` as it arrives.
-4.  **Remove Reflection Step**: The original `app.py` has a two-step process: a draft generation and then a reflection step. The DeepSeek V3.1 "thinking" mode is designed to perform a similar internal reasoning process. Therefore, the second API call for the `system_prompt_reflection` is no longer necessary and is commented out for a cleaner, more efficient workflow.
-
-By implementing these changes, your app will now use the DeepSeek V3.1 model and leverage its built-in reasoning capabilities for a more robust and self-correcting response generation.
-
-***
-Here is a video from YouTube that provides a high-level overview of DeepSeek V3.1. It provides additional context about the model's capabilities, including its hybrid thinking mode and how it compares to other models. [DeepSeek V3.1: Bigger Than You Think!](https://www.youtube.com/watch?v=Y9l_oMVGGTc)
-http://googleusercontent.com/youtube_content/1

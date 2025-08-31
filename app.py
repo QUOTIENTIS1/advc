@@ -260,7 +260,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
         
 # -----------------------------
-# Chat input with Consistency Check (Modified)
+# Chat input with Two-Step Consistency Check
 # -----------------------------
 user_input = st.chat_input("Ask a question, summarize a file, or request a tool")
 if user_input:
@@ -269,13 +269,18 @@ if user_input:
 
     file_context = st.session_state.file_text or "No file content available."
     full_prompt = f"{user_input}\n\nContext:\n{file_context[:4000]}"
-
-    # System prompt for the primary generation with tool use
-    system_prompt_primary = (
-        "You are a helpful assistant that answers questions and summarizes uploaded files. "
-        "You may call external tools when needed. If you decide to use a tool, return ONLY a single JSON object "
-        "and nothing else, exactly like: {\"tool\":\"<tool_name>\", \"parameters\": { ... }}. "
-        f"Available tools: {[(t['function']['name'], t['function']['description']) for t in TOOL_DESCRIPTIONS]}"
+    
+    # New system prompt for the Tool Decision step
+    system_prompt_tool_decision = (
+        "You are a highly logical assistant. Your only task is to determine whether an external tool is necessary "
+        "to answer the user's query. Return 'True' if a tool is absolutely required (e.g., for real-time data, complex calculations, web searches, or code execution) "
+        "and 'False' if the question can be answered from your own knowledge (e.g., general definitions, creative writing, or summarization of provided text)."
+        "Do not provide any other text, just 'True' or 'False'."
+    )
+    
+    # System prompt for the direct answer generation step
+    system_prompt_direct_answer = (
+        "You are a helpful assistant that answers questions and summarizes uploaded files. Do not use tools."
     )
     
     # System prompt for the reflection/consistency check
@@ -286,49 +291,107 @@ if user_input:
     )
 
     with st.chat_message("assistant"):
-        with st.spinner("🧠 Generating and checking answer..."):
+        with st.spinner("🧠 Analyzing and generating response..."):
             try:
-                # Step 1: Primary Generation (First Pass)
-                # Use DeepSeek V3.1 and enable thinking mode
-                completion = client.chat.completions.create(
+                # Step 1: Tool Decision (using DeepSeek V3.1 for better reasoning)
+                decision_response = client.chat.completions.create(
                     model="deepseek-ai/deepseek-v3.1",
                     messages=[
-                        {"role": "system", "content": system_prompt_primary},
+                        {"role": "system", "content": system_prompt_tool_decision},
                         {"role": "user", "content": full_prompt}
                     ],
-                    temperature=0.2,
-                    top_p=0.7,
-                    max_tokens=8192,
-                    extra_body={"chat_template_kwargs": {"thinking":True}},
-                    stream=True,
+                    temperature=0.1, # Keep temperature low for predictable output (True/False)
+                    max_tokens=10, # Keep tokens low as the response is short
                 )
                 
-                # Stream the response to the UI
-                placeholder = st.empty()
-                full_response = ""
+                needs_tool = decision_response.choices[0].message.content.strip().lower() == 'true'
                 
-                for chunk in completion:
-                    # Capture and print reasoning content
-                    reasoning = getattr(chunk.choices[0].delta, "reasoning_content", None)
-                    if reasoning:
-                        # You can choose to display reasoning in a separate section or as a comment
-                        # For now, we'll just print it to the console for demonstration
-                        print(f"Reasoning: {reasoning}", end="")
+                # Step 2: Act based on the decision
+                if needs_tool:
+                    st.markdown("🌐 **Decision:** A tool is required. Starting tool-based workflow.")
                     
-                    # Capture and display the main content
-                    if chunk.choices[0].delta.content is not None:
-                        full_response += chunk.choices[0].delta.content
-                        placeholder.markdown(full_response + "▌")
-                
-                placeholder.markdown(full_response)
-                
-                # We'll skip the consistency check for now as the DeepSeek "thinking"
-                # mode already incorporates a form of self-correction and reasoning.
-                
-                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    # Original tool-calling logic from your first version
+                    # First API call to get the tool call
+                    response_draft = client.chat.completions.create(
+                        model="deepseek-ai/deepseek-v3.1",
+                        messages=[
+                            {"role": "system", "content": system_prompt_primary},
+                            {"role": "user", "content": full_prompt}
+                        ],
+                        tools=TOOL_DESCRIPTIONS,  
+                        tool_choice="auto",
+                        temperature=0.7,
+                        top_p=1,
+                        max_tokens=8192,
+                    )
+                    
+                    message_draft = response_draft.choices[0].message
+                    tool_name = message_draft.tool_calls[0].function.name
+                    tool_params = json.loads(message_draft.tool_calls[0].function.arguments)
+                    
+                    st.markdown(f"**Action:** Calling tool `{tool_name}` with parameters: `{tool_params}`")
+                    
+                    if tool_name in TOOLS:
+                        tool_func = TOOLS[tool_name]
+                        tool_output = tool_func(**tool_params)
+                        
+                        st.markdown(f"**Tool Output:**")
+                        st.code(tool_output)
+                        
+                        # Follow-up API call to summarize tool output and provide a final answer
+                        followup_messages = [
+                            {"role": "user", "content": full_prompt},
+                            {"role": "assistant", "content": json.dumps(message_draft.tool_calls[0].function.to_dict())},
+                            {"role": "tool", "content": tool_output, "name": tool_name}
+                        ]
+                        
+                        final_response = client.chat.completions.create(
+                            model="deepseek-ai/deepseek-v3.1",
+                            messages=followup_messages,
+                            temperature=0.7,
+                            top_p=1,
+                            max_tokens=8192,
+                        )
+                        final_response_content = final_response.choices[0].message.content
+                        st.markdown(final_response_content)
+                        st.session_state.messages.append({"role": "assistant", "content": final_response_content})
+
+                else:
+                    st.markdown("🧠 **Decision:** No tool required. Generating direct answer.")
+                    
+                    # No tool call, proceed with the direct answer generation and consistency check
+                    draft_response = client.chat.completions.create(
+                        model="deepseek-ai/deepseek-v3.1",
+                        messages=[
+                            {"role": "system", "content": system_prompt_direct_answer},
+                            {"role": "user", "content": full_prompt}
+                        ],
+                        temperature=0.7,
+                        max_tokens=8192,
+                    )
+                    draft_content = draft_response.choices[0].message.content
+                    
+                    # Pause briefly before the reflection call
+                    time.sleep(0.2)
+                    
+                    # Consistency Check (Reflection)
+                    reflection_prompt = f"Initial draft:\n{draft_content}\n\nReview this draft for accuracy and clarity, then provide a final, improved answer. The final answer should be well-written and comprehensive. Do not use tools."
+
+                    reflection_response = client.chat.completions.create(
+                        model="deepseek-ai/deepseek-v3.1",
+                        messages=[
+                            {"role": "system", "content": system_prompt_reflection},
+                            {"role": "user", "content": reflection_prompt}
+                        ],
+                        temperature=0.2, # Lower temperature for focused refinement
+                        max_tokens=8192,
+                    )
+                    
+                    final_content = reflection_response.choices[0].message.content
+                    st.markdown(final_content)
+                    st.session_state.messages.append({"role": "assistant", "content": final_content})
 
             except Exception as e:
                 err = f"❌ API call failed: {e}"
                 st.error(err)
                 st.session_state.messages.append({"role": "assistant", "content": err})
-

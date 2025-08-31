@@ -7,7 +7,7 @@ import requests, subprocess, csv, json, sys
 from io import StringIO
 
 # -----------------------------
-# 🔐 NVIDIA NIM API client (kept as you had it)
+# 🔐 NVIDIA NIM API client
 # -----------------------------
 client = OpenAI(
     api_key="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",
@@ -104,7 +104,7 @@ def beautify_tool_output(tool: str, result: str) -> str:
         return result
 
 # -----------------------------
-# Tool registry for function-calling
+# Tool registry
 # -----------------------------
 TOOLS = {
     "web_search": run_web_search,
@@ -217,22 +217,13 @@ if user_input:
                     )
 
                     raw_msg = response.choices[0].message
-                    try:
-                        content = raw_msg.content
-                    except Exception:
-                        content = raw_msg.get("content") if isinstance(raw_msg, dict) else ""
-                    if hasattr(raw_msg, "tool_calls"):
-                        tool_calls = raw_msg.tool_calls
-                    elif isinstance(raw_msg, dict):
-                        tool_calls = raw_msg.get("tool_calls") or raw_msg.get("tool_call") or None
-                    else:
-                        tool_calls = None
+                    content = getattr(raw_msg, "content", None) or (raw_msg.get("content") if isinstance(raw_msg, dict) else "")
+                    tool_calls = getattr(raw_msg, "tool_calls", None) if not isinstance(raw_msg, dict) else raw_msg.get("tool_calls")
 
                     if not tool_calls:
                         final_reply = content
                         break
 
-                    tool_results = []
                     for tool_call in tool_calls:
                         func_obj = getattr(tool_call, "function", None) if not isinstance(tool_call, dict) else tool_call.get("function")
                         name = getattr(func_obj, "name", None) if not isinstance(func_obj, dict) else func_obj.get("name")
@@ -248,21 +239,24 @@ if user_input:
                             args = raw_args
 
                         if not name or name not in TOOLS:
-                            tool_results.append({"tool": name, "result": "❌ Invalid tool call."})
+                            st.warning(f"❌ Invalid tool call: {name}")
                             continue
 
-                        try:
-                            result = TOOLS[name](**args)
-                        except Exception as e:
-                            result = f"⚠️ Tool error: {e}"
+                        # Run tool
+                        result_raw = TOOLS[name](**args)
+                        pretty_result = beautify_tool_output(name, result_raw)
 
-                        # 🔥 Beautify result here
-                        pretty_result = beautify_tool_output(name, result)
-                        tool_results.append({"tool": name, "result": pretty_result})
+                        # Show pretty result to user
+                        st.markdown(pretty_result)
 
-                    messages_for_model.append({"role": "assistant", "content": json.dumps(tool_results)})
-                    combined_tool_outputs = "\n\n".join([f"{tr['result']}" for tr in tool_results])
-                    messages_for_model.append({"role": "system", "content": f"Tool outputs:\n{combined_tool_outputs}\nUse these to answer the user."})
+                        # Feed raw result back to model
+                        messages_for_model.append({
+                            "role": "system",
+                            "content": f"Tool output ({name}): {result_raw}"
+                        })
+
+                    # After tool use, tell model to continue
+                    messages_for_model.append({"role": "system", "content": "Use the tool outputs above to answer the user."})
 
                 if final_reply is None:
                     wrapup = client.chat.completions.create(
@@ -273,10 +267,7 @@ if user_input:
                         max_tokens=1024,
                     )
                     raw_wrap = wrapup.choices[0].message
-                    try:
-                        final_reply = raw_wrap.content
-                    except Exception:
-                        final_reply = raw_wrap.get("content") if isinstance(raw_wrap, dict) else "Sorry, couldn't produce a final reply."
+                    final_reply = getattr(raw_wrap, "content", None) or (raw_wrap.get("content") if isinstance(raw_wrap, dict) else "Sorry, couldn't produce a final reply.")
 
                 st.markdown(final_reply)
                 st.session_state.messages.append({"role": "assistant", "content": final_reply})

@@ -18,8 +18,9 @@ client = OpenAI(
 # Tools Implementation
 # -----------------------------
 def run_web_search(query: str) -> str:
-    """DuckDuckGo-based search, returns cleaned summary if possible with fallback"""
+    """DuckDuckGo search with fallback to Google News RSS if empty"""
     try:
+        # --- First try DuckDuckGo Instant Answer API ---
         url = "https://api.duckduckgo.com/"
         params = {"q": query, "format": "json"}
         res = requests.get(url, params=params, timeout=10)
@@ -31,7 +32,7 @@ def run_web_search(query: str) -> str:
 
         related = data.get("RelatedTopics", [])
         results = []
-        for item in related[:5]:  # top 5 results only
+        for item in related[:5]:  # top 5
             if isinstance(item, dict) and item.get("Text"):
                 results.append({
                     "title": item.get("Text"),
@@ -39,26 +40,34 @@ def run_web_search(query: str) -> str:
                     "url": item.get("FirstURL", "")
                 })
 
-        # ✅ Fallback logic
         if results:
-            # Try to filter for relevant matches
-            keywords = ["tariff", "trade", "duties", "customs", "export", "import"]
-            good_matches = [
-                r for r in results
-                if any(kw in r["title"].lower() or kw in r["snippet"].lower() for kw in keywords)
-            ]
+            return json.dumps(results)
 
-            if good_matches:
-                return json.dumps(good_matches)
-            else:
-                # Return closest available results with disclaimer
-                return json.dumps([{
-                    "title": "⚠️ Closest available results (no exact tariff/trade match)",
-                    "snippet": "Showing related or nearby results since no direct matches were found.",
-                    "url": ""
-                }] + results)
+        # --- Fallback: Google News RSS (JSON) ---
+        rss_url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en-US&gl=US&ceid=US:en"
+        rss_res = requests.get(rss_url, timeout=10)
+        if rss_res.status_code == 200:
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(rss_res.text)
+            items = root.findall(".//item")
+            news_results = []
+            for item in items[:5]:
+                title = item.find("title").text if item.find("title") is not None else "No title"
+                link = item.find("link").text if item.find("link") is not None else ""
+                desc = item.find("description").text if item.find("description") is not None else ""
+                news_results.append({
+                    "title": title,
+                    "snippet": desc,
+                    "url": link
+                })
+            if news_results:
+                return json.dumps(news_results)
 
-        return f"❌ No results found for '{query}'."
+        return json.dumps([{
+            "title": "❌ No results",
+            "snippet": f"No relevant results found for '{query}'.",
+            "url": ""
+        }])
 
     except Exception as e:
         return f"❌ Web search failed: {e}"
@@ -83,6 +92,7 @@ def run_code(code: str) -> str:
     except Exception as e:
         return f"❌ Code execution failed: {e}"
 
+
 def format_data(data: str, from_format="csv", to_format="json") -> str:
     try:
         if from_format == "csv" and to_format == "json":
@@ -95,11 +105,11 @@ def format_data(data: str, from_format="csv", to_format="json") -> str:
     except Exception as e:
         return f"❌ Data formatting failed: {e}"
 
+
 # -----------------------------
-# Post-processing for tool outputs
+# Post-processing
 # -----------------------------
 def beautify_tool_output(tool: str, result: str) -> str:
-    """Turn raw tool outputs into professional responses"""
     try:
         if tool == "web_search":
             if result.startswith("❌"):
@@ -138,7 +148,7 @@ TOOL_DESCRIPTIONS = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Search the web and retrieve relevant information.",
+            "description": "Search the web and retrieve relevant information (DuckDuckGo + Google News fallback).",
             "parameters": {"type": "object","properties":{"query":{"type":"string"}},"required":["query"]}
         },
     },
@@ -267,16 +277,16 @@ if user_input:
                         result_raw = TOOLS[name](**args)
                         pretty_result = beautify_tool_output(name, result_raw)
 
-                        # Show pretty result to user
+                        # Show pretty result
                         st.markdown(pretty_result)
 
-                        # Feed raw result back to model
+                        # Feed raw back to model
                         messages_for_model.append({
                             "role": "system",
                             "content": f"Tool output ({name}): {result_raw}"
                         })
 
-                    # After tool use, tell model to continue
+                    # Tell model to continue
                     messages_for_model.append({"role": "system", "content": "Use the tool outputs above to answer the user."})
 
                 if final_reply is None:
@@ -297,4 +307,3 @@ if user_input:
                 err = f"❌ API call failed: {e}"
                 st.error(err)
                 st.session_state.messages.append({"role": "assistant", "content": err})
-
